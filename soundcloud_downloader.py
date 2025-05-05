@@ -2,68 +2,110 @@
 import os
 import time
 import subprocess
+import urllib.parse
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import StaleElementReferenceException
 from webdriver_manager.chrome import ChromeDriverManager
 
 def setup_driver():
     """Chromeドライバーのセットアップ"""
     chrome_options = Options()
     chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--disable-gpu')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
     
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
     return driver
 
-def get_track_urls(search_url):
+def get_track_urls(search_query, max_tracks=10):
     """検索結果からトラックのURLを取得"""
     driver = setup_driver()
     try:
+        print("検索ページにアクセス中...")
+        encoded_query = urllib.parse.quote(search_query)
+        search_url = f"https://soundcloud.com/search/sounds?q={encoded_query}"
         driver.get(search_url)
-        # 検索結果が読み込まれるまで待機
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/tracks/']"))
-        )
         
-        # トラックのURLを取得
-        track_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='/tracks/']")
-        urls = [link.get_attribute('href') for link in track_links]
+        # 明示的な待機を設定
+        wait = WebDriverWait(driver, 10)
+        wait.until(EC.presence_of_all_elements_located((
+            By.CSS_SELECTOR,
+            "a.sc-link-primary.soundTitle__title"
+        )))
         
-        # 重複を除去
-        return list(set(urls))
+        print("検索結果を解析中...")
+        # トラックリンクを取得（stale対策付き）
+        track_links = []
+        retry_count = 3
+        seen_urls = set()
+        
+        for _ in range(max_tracks * retry_count):
+            try:
+                elements = driver.find_elements(
+                    By.CSS_SELECTOR,
+                    "a.sc-link-primary.soundTitle__title"
+                )
+                for element in elements:
+                    url = element.get_attribute('href')
+                    if url and url not in seen_urls:
+                        track_links.append(url)
+                        seen_urls.add(url)
+                    if len(track_links) >= max_tracks:
+                        break
+                if len(track_links) >= max_tracks:
+                    break
+            except StaleElementReferenceException:
+                time.sleep(1)
+                continue
+            
+            # スクロールしてより多くの結果を読み込む
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(2)
+        
+        return track_links[:max_tracks]
+    except Exception as e:
+        print(f"エラーが発生しました: {e}")
+        return []
     finally:
         driver.quit()
 
 def download_tracks(urls):
     """scdlを使用してトラックをダウンロード"""
-    for url in urls:
+    for i, url in enumerate(urls, 1):
         try:
-            print(f"Downloading: {url}")
+            print(f"\n[{i}/{len(urls)}] ダウンロード中: {url}")
             subprocess.run(["scdl", "-l", url, "--add-description"], check=True)
             time.sleep(1)  # サーバーへの負荷を軽減
         except subprocess.CalledProcessError as e:
-            print(f"Error downloading {url}: {e}")
+            print(f"ダウンロードエラー: {url} - {e}")
 
 def main():
     search_query = input("検索キーワードを入力してください: ")
-    search_url = f"https://soundcloud.com/search?q={search_query.replace(' ', '%20')}"
+    max_tracks = int(input("ダウンロードする最大曲数を入力してください（デフォルト: 10）: ") or "10")
     
-    print("検索結果からURLを取得中...")
-    urls = get_track_urls(search_url)
+    print("\n検索結果からURLを取得中...")
+    urls = get_track_urls(search_query, max_tracks)
     
     if not urls:
         print("トラックが見つかりませんでした。")
         return
     
-    print(f"{len(urls)}個のトラックが見つかりました。")
-    download_tracks(urls)
-    print("ダウンロードが完了しました。")
+    print(f"\n{len(urls)}個のトラックが見つかりました。")
+    proceed = input("ダウンロードを開始しますか？ (y/n): ")
+    
+    if proceed.lower() == 'y':
+        download_tracks(urls)
+        print("\nダウンロードが完了しました。")
+    else:
+        print("ダウンロードをキャンセルしました。")
 
 if __name__ == "__main__":
-    main() 
+    main()
