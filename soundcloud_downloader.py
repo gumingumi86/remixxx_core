@@ -81,22 +81,15 @@ def search_youtube_video(track_name):
     finally:
         driver.quit()
 
-def download_from_youtube(url, output_dir='/workspace'):
-    """YouTubeから音源をダウンロード"""
-    try:
-        # 最高品質の音声をダウンロード
-        subprocess.run([
-            "yt-dlp",
-            "-x",  # 音声のみ
-            "--audio-format", "mp3",  # MP3形式
-            "--audio-quality", "0",  # 最高品質
-            "-o", f"{output_dir}/%(title)s.%(ext)s",  # 出力形式
-            url
-        ], check=True)
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"ダウンロードエラー: {e}")
-        return False
+def setup_download_dir():
+    """ダウンロードディレクトリの設定"""
+    # メインディレクトリ
+    downloads_dir = os.path.join('/workspace', 'downloads')
+    os.makedirs(downloads_dir, exist_ok=True)
+    
+    os.makedirs(downloads_dir, exist_ok=True)
+    
+    return downloads_dir
 
 def get_track_urls(search_query, max_tracks=10):
     """検索結果からトラックのURLを取得"""
@@ -152,21 +145,41 @@ def get_track_urls(search_query, max_tracks=10):
 
 def download_tracks(urls):
     """scdlを使用してトラックをダウンロード"""
+    download_dir = setup_download_dir()
     downloaded_files = []
+    
     for i, url in enumerate(urls, 1):
         try:
             print(f"\n[{i}/{len(urls)}] ダウンロード中: {url}")
-            subprocess.run(["scdl", "-l", url], check=True)
+            # 5分以上の音源を制限（約10MBを想定）
+            subprocess.run(["scdl", "-l", url, "--path", download_dir, "--max-size", "10m"], check=True)
             time.sleep(1)  # サーバーへの負荷を軽減
             
             # 最新のダウンロードファイルを取得
-            files = [f for f in os.listdir('/workspace') if f.endswith('.mp3')]
+            files = [f for f in os.listdir(download_dir) if f.endswith('.mp3')]
             if files:
-                downloaded_files.append(max(files, key=lambda x: os.path.getctime(os.path.join('/workspace', x))))
+                downloaded_files.append(max(files, key=lambda x: os.path.getctime(os.path.join(download_dir, x))))
         except subprocess.CalledProcessError as e:
             print(f"ダウンロードエラー: {url} - {e}")
     
     return downloaded_files
+
+def download_from_youtube(url, output_dir):
+    """YouTubeから音源をダウンロード"""
+    try:
+        # 最高品質の音声をダウンロード
+        subprocess.run([
+            "yt-dlp",
+            "-x",  # 音声のみ
+            "--audio-format", "mp3",  # MP3形式
+            "--audio-quality", "0",  # 最高品質
+            "-o", f"{output_dir}/%(title)s.%(ext)s",  # 出力形式
+            url
+        ], check=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"ダウンロードエラー: {e}")
+        return False
 
 def save_track_pairs(remix_file, remix_url, original_name, youtube_url, original_file):
     """リミックスとオリジナルの対応関係をCSVに保存"""
@@ -202,6 +215,7 @@ def main():
     proceed = input("ダウンロードを開始しますか？ (y/n): ")
     
     if proceed.lower() == 'y':
+        download_dir = setup_download_dir()
         downloaded_files = download_tracks(urls)
         print("\nリミックス音源のダウンロードが完了しました。")
         
@@ -216,14 +230,20 @@ def main():
                 youtube_url = search_youtube_video(original_name)
                 if youtube_url:
                     print(f"オリジナル曲をダウンロード中: {youtube_url}")
-                    if download_from_youtube(youtube_url):
+                    if download_from_youtube(youtube_url, download_dir):
                         print("ダウンロードが完了しました。")
                         # 最新のダウンロードファイルを取得
-                        original_files = [f for f in os.listdir('/workspace') if f.endswith('.mp3')]
+                        original_files = [f for f in os.listdir(download_dir) if f.endswith('.mp3')]
                         if original_files:
-                            original_file = max(original_files, key=lambda x: os.path.getctime(os.path.join('/workspace', x)))
+                            original_file = max(original_files, key=lambda x: os.path.getctime(os.path.join(download_dir, x)))
                             # 対応関係をCSVに保存
-                            save_track_pairs(filename, url, original_name, youtube_url, original_file)
+                            save_track_pairs(
+                                os.path.join(download_dir, filename),
+                                url,
+                                original_name,
+                                youtube_url,
+                                os.path.join(download_dir, original_file)
+                            )
                             print("対応関係をCSVに保存しました。")
                     else:
                         print("ダウンロードに失敗しました。")
@@ -231,7 +251,8 @@ def main():
                     print("オリジナル曲が見つかりませんでした。")
         
         print("\nすべてのダウンロードが完了しました。")
-        print(f"対応関係は 'track_pairs.csv' に保存されました。")
+        print(f"ダウンロードされたファイルは以下のディレクトリに保存されています：")
+        print(f"保存先: {download_dir}")
     else:
         print("ダウンロードをキャンセルしました。")
 

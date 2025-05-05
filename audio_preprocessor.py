@@ -137,7 +137,7 @@ class AudioPreprocessor:
 def main():
     # 前処理の実行
     preprocessor = AudioPreprocessor(
-        input_dir='/workspace',
+        input_dir='/workspace/downloads',
         output_dir='/workspace/processed'
     )
     
