@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     wget \
     gnupg \
+    libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Chromeのインストール
@@ -24,7 +25,9 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
 RUN pip3 install scdl
 
 # Pythonパッケージのインストール
-RUN pip3 install requests beautifulsoup4 selenium webdriver_manager yt-dlp
+RUN pip3 install requests beautifulsoup4 selenium webdriver_manager yt-dlp \
+    numpy pandas librosa soundfile torch torchaudio \
+    scikit-learn matplotlib seaborn
 
 # 作業ディレクトリの設定
 WORKDIR /workspace

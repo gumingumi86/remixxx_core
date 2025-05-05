@@ -156,7 +156,7 @@ def download_tracks(urls):
     for i, url in enumerate(urls, 1):
         try:
             print(f"\n[{i}/{len(urls)}] ダウンロード中: {url}")
-            subprocess.run(["scdl", "-l", url, "--add-description"], check=True)
+            subprocess.run(["scdl", "-l", url], check=True)
             time.sleep(1)  # サーバーへの負荷を軽減
             
             # 最新のダウンロードファイルを取得

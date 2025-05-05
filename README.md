@@ -9,6 +9,11 @@
 
 ## 使用方法
 
+0. ビルド
+```bash
+docker-compose build --no-cache
+```
+
 1. 環境の起動:
 ```bash
 docker-compose up -d
