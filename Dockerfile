@@ -24,7 +24,7 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
 RUN pip3 install scdl
 
 # Pythonパッケージのインストール
-RUN pip3 install requests beautifulsoup4 selenium webdriver_manager
+RUN pip3 install requests beautifulsoup4 selenium webdriver_manager yt-dlp
 
 # 作業ディレクトリの設定
 WORKDIR /workspace

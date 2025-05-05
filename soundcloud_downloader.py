@@ -4,6 +4,8 @@ import time
 import subprocess
 import urllib.parse
 import re
+import csv
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -51,27 +53,24 @@ def clean_filename(filename):
     
     return name.strip()
 
-def search_original_track(track_name):
-    """オリジナル曲を検索"""
+def search_youtube_video(track_name):
+    """YouTubeで曲を検索"""
     driver = setup_driver()
     try:
-        print(f"\nオリジナル曲を検索中: {track_name}")
-        encoded_query = urllib.parse.quote(track_name)
-        search_url = f"https://soundcloud.com/search/sounds?q={encoded_query}"
+        print(f"\nYouTubeで検索中: {track_name}")
+        encoded_query = urllib.parse.quote(f"{track_name} audio")
+        search_url = f"https://www.youtube.com/results?search_query={encoded_query}"
         driver.get(search_url)
         
         # 明示的な待機を設定
         wait = WebDriverWait(driver, 10)
         wait.until(EC.presence_of_all_elements_located((
             By.CSS_SELECTOR,
-            "a.sc-link-primary.soundTitle__title"
+            "a#video-title"
         )))
         
         # 最初の検索結果を取得
-        elements = driver.find_elements(
-            By.CSS_SELECTOR,
-            "a.sc-link-primary.soundTitle__title"
-        )
+        elements = driver.find_elements(By.CSS_SELECTOR, "a#video-title")
         
         if elements:
             return elements[0].get_attribute('href')
@@ -81,6 +80,23 @@ def search_original_track(track_name):
         return None
     finally:
         driver.quit()
+
+def download_from_youtube(url, output_dir='/workspace'):
+    """YouTubeから音源をダウンロード"""
+    try:
+        # 最高品質の音声をダウンロード
+        subprocess.run([
+            "yt-dlp",
+            "-x",  # 音声のみ
+            "--audio-format", "mp3",  # MP3形式
+            "--audio-quality", "0",  # 最高品質
+            "-o", f"{output_dir}/%(title)s.%(ext)s",  # 出力形式
+            url
+        ], check=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"ダウンロードエラー: {e}")
+        return False
 
 def get_track_urls(search_query, max_tracks=10):
     """検索結果からトラックのURLを取得"""
@@ -152,6 +168,25 @@ def download_tracks(urls):
     
     return downloaded_files
 
+def save_track_pairs(remix_file, remix_url, original_name, youtube_url, original_file):
+    """リミックスとオリジナルの対応関係をCSVに保存"""
+    csv_file = 'track_pairs.csv'
+    file_exists = os.path.exists(csv_file)
+    
+    with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(['timestamp', 'remix_file', 'remix_url', 'original_name', 'youtube_url', 'original_file'])
+        
+        writer.writerow([
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            remix_file,
+            remix_url,
+            original_name,
+            youtube_url,
+            original_file
+        ])
+
 def main():
     search_query = input("検索キーワードを入力してください: ")
     max_tracks = int(input("ダウンロードする最大曲数を入力してください（デフォルト: 10）: ") or "10")
@@ -172,24 +207,31 @@ def main():
         
         # オリジナル曲の検索とダウンロード
         print("\nオリジナル曲の検索を開始します...")
-        for filename in downloaded_files:
+        for i, (filename, url) in enumerate(zip(downloaded_files, urls), 1):
             original_name = clean_filename(filename)
             if original_name:
-                print(f"\nファイル名: {filename}")
+                print(f"\n[{i}/{len(downloaded_files)}] ファイル名: {filename}")
                 print(f"抽出した曲名: {original_name}")
                 
-                original_url = search_original_track(original_name)
-                if original_url:
-                    print(f"オリジナル曲をダウンロード中: {original_url}")
-                    try:
-                        subprocess.run(["scdl", "-l", original_url, "--add-description"], check=True)
-                        time.sleep(1)
-                    except subprocess.CalledProcessError as e:
-                        print(f"ダウンロードエラー: {e}")
+                youtube_url = search_youtube_video(original_name)
+                if youtube_url:
+                    print(f"オリジナル曲をダウンロード中: {youtube_url}")
+                    if download_from_youtube(youtube_url):
+                        print("ダウンロードが完了しました。")
+                        # 最新のダウンロードファイルを取得
+                        original_files = [f for f in os.listdir('/workspace') if f.endswith('.mp3')]
+                        if original_files:
+                            original_file = max(original_files, key=lambda x: os.path.getctime(os.path.join('/workspace', x)))
+                            # 対応関係をCSVに保存
+                            save_track_pairs(filename, url, original_name, youtube_url, original_file)
+                            print("対応関係をCSVに保存しました。")
+                    else:
+                        print("ダウンロードに失敗しました。")
                 else:
                     print("オリジナル曲が見つかりませんでした。")
         
         print("\nすべてのダウンロードが完了しました。")
+        print(f"対応関係は 'track_pairs.csv' に保存されました。")
     else:
         print("ダウンロードをキャンセルしました。")
 
