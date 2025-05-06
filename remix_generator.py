@@ -12,9 +12,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 class AudioDataset(Dataset):
-    def __init__(self, csv_file, transform=None):
+    def __init__(self, csv_file, transform=None, target_size=(128, 1024)):
         self.data = pd.read_csv(csv_file)
         self.transform = transform
+        self.target_size = target_size
         
     def __len__(self):
         return len(self.data)
@@ -24,7 +25,25 @@ class AudioDataset(Dataset):
         original_mel = np.load(self.data.iloc[idx]['original_mel'])
         remix_mel = np.load(self.data.iloc[idx]['remix_mel'])
         
+        # サイズの正規化
+        original_mel = self._normalize_size(original_mel)
+        remix_mel = self._normalize_size(remix_mel)
+        
         return torch.FloatTensor(original_mel), torch.FloatTensor(remix_mel)
+    
+    def _normalize_size(self, mel):
+        # 現在のサイズを取得
+        current_height, current_width = mel.shape
+        
+        # 高さが異なる場合はリサイズ
+        if current_height != self.target_size[0]:
+            mel = librosa.util.fix_length(mel, size=self.target_size[0], axis=0)
+        
+        # 幅が異なる場合はリサイズ
+        if current_width != self.target_size[1]:
+            mel = librosa.util.fix_length(mel, size=self.target_size[1], axis=1)
+        
+        return mel
 
 class RemixGenerator(nn.Module):
     def __init__(self):
@@ -161,10 +180,21 @@ def main():
     torch.save(trained_model.state_dict(), 'remix_generator.pth')
     
     # テスト用のリミックス生成
-    test_audio = input("リミックスを生成する音声ファイルのパスを入力してください: ")
-    output_path = "generated_remix.wav"
-    generate_remix(trained_model, test_audio, output_path)
-    print(f"リミックスが生成されました: {output_path}")
+    while True:
+        test_audio = input("リミックスを生成する音声ファイルのパスを入力してください（終了するには 'q' を入力）: ")
+        if test_audio.lower() == 'q':
+            break
+            
+        if not os.path.exists(test_audio):
+            print(f"エラー: ファイル '{test_audio}' が見つかりません。")
+            continue
+            
+        output_path = os.path.splitext(test_audio)[0] + "_remix.wav"
+        try:
+            generate_remix(trained_model, test_audio, output_path)
+            print(f"リミックスが生成されました: {output_path}")
+        except Exception as e:
+            print(f"エラーが発生しました: {str(e)}")
 
 if __name__ == "__main__":
     main() 
