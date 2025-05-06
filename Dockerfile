@@ -21,16 +21,12 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# scdlのインストール
-RUN pip3 install scdl
-
-# Pythonパッケージのインストール
-RUN pip3 install requests beautifulsoup4 selenium webdriver_manager yt-dlp \
-    numpy pandas librosa soundfile torch torchaudio \
-    scikit-learn matplotlib seaborn
-
 # 作業ディレクトリの設定
 WORKDIR /workspace
+
+# 依存関係ファイルのコピーとインストール
+COPY requirements.txt .
+RUN pip3 install -r requirements.txt
 
 # シェルの設定
 SHELL ["/bin/bash", "-c"] 
