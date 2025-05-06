@@ -168,8 +168,8 @@ class TrackSearcher:
 def get_environment_variables():
     """環境変数から設定を取得"""
     search_query = os.environ.get('SEARCH_QUERY')
-    max_tracks = int(os.environ.get('MAX_TRACKS', '10'))
-    download_dir = os.environ.get('DOWNLOAD_DIR', os.path.join('/workspace', 'downloads'))
+    max_tracks = int(os.environ.get('MAX_TRACKS', '5'))
+    download_dir = os.environ.get('DOWNLOAD_DIR', 'downloads')
     auto_download = os.environ.get('AUTO_DOWNLOAD', 'false').lower() == 'true'
     
     if not search_query:
@@ -186,19 +186,12 @@ def main():
     searcher = TrackSearcher()
     try:
         # 環境変数から設定を取得
-        try:
-            config = get_environment_variables()
-            search_query = config['search_query']
-            max_tracks = config['max_tracks']
-            download_dir = config['download_dir']
-            auto_download = config['auto_download']
-        except ValueError as e:
-            logger.error(f"環境変数の設定エラー: {e}")
-            # 対話モードにフォールバック
-            search_query = input("検索キーワードを入力してください: ")
-            max_tracks = int(input("ダウンロードする最大曲数を入力してください（デフォルト: 10）: ") or "10")
-            download_dir = os.path.join('/workspace', 'downloads')
-            auto_download = False
+        search_query = os.environ.get('SEARCH_QUERY')
+        max_tracks = int(os.environ.get('MAX_TRACKS', '5'))
+        download_dir = os.environ.get('DOWNLOAD_DIR', 'downloads')
+        
+        if not search_query:
+            raise ValueError("SEARCH_QUERY environment variable is required")
         
         logger.info("検索結果からURLを取得中...")
         urls = searcher.search_soundcloud_tracks(search_query, max_tracks)
@@ -209,13 +202,6 @@ def main():
         
         logger.info(f"{len(urls)}個のトラックが見つかりました。")
         
-        # 自動ダウンロードが有効でない場合は確認
-        if not auto_download:
-            proceed = input("ダウンロードを開始しますか？ (y/n): ")
-            if proceed.lower() != 'y':
-                logger.info("ダウンロードをキャンセルしました。")
-                return
-        
         os.makedirs(download_dir, exist_ok=True)
         
         # リミックス音源のダウンロード
@@ -223,13 +209,29 @@ def main():
         for i, url in enumerate(urls, 1):
             try:
                 logger.info(f"\n[{i}/{len(urls)}] ダウンロード中: {url}")
-                subprocess.run(["scdl", "-l", url, "--path", download_dir, "--max-size", "10m"], check=True)
-                time.sleep(1)
-                
-                files = [f for f in os.listdir(download_dir) if f.endswith('.mp3')]
-                if files:
-                    downloaded_files.append(max(files, key=lambda x: os.path.getctime(os.path.join(download_dir, x))))
-            except subprocess.CalledProcessError as e:
+                try:
+                    subprocess.run([
+                        "scdl",
+                        "-l", url,
+                        "--path", download_dir,
+                        "--max-size", "10m",
+                        "-c",  # 既存のファイルを上書き
+                        "--overwrite"  # 強制的に上書き
+                    ], check=True)
+                    time.sleep(1)
+                    
+                    # ダウンロードされたファイルを確認
+                    files = [f for f in os.listdir(download_dir) if f.endswith('.mp3')]
+                    if files:
+                        latest_file = max(files, key=lambda x: os.path.getctime(os.path.join(download_dir, x)))
+                        downloaded_files.append(latest_file)
+                        logger.info(f"ダウンロード成功: {latest_file}")
+                    else:
+                        logger.warning(f"ファイルが見つかりません: {url}")
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"ダウンロードエラー: {url} - {e}")
+                    continue
+            except Exception as e:
                 logger.error(f"ダウンロードエラー: {url} - {e}")
         
         logger.info("リミックス音源のダウンロードが完了しました。")

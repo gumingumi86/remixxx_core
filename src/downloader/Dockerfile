@@ -36,7 +36,7 @@ ENV S3_PREFIX="raw_data"
 
 # 検索用の環境変数
 ENV SEARCH_QUERY="anime lofi remix"
-ENV MAX_TRACKS="500"
+ENV MAX_TRACKS="5"
 ENV OUTPUT_CSV="track_pairs.csv"
 
 # ダウンロード用の環境変数

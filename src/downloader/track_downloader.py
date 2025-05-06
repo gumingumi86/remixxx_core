@@ -20,6 +20,12 @@ class TrackDownloader:
         os.makedirs(output_dir, exist_ok=True)
         df = pd.read_csv(csv_file)
         
+        # 必要なカラムの存在を確認
+        required_columns = ['remix_url']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise ValueError(f"CSVファイルに必要なカラムがありません: {missing_columns}")
+        
         downloaded_data = []
         for _, row in df.iterrows():
             try:
@@ -29,23 +35,13 @@ class TrackDownloader:
                     "scdl",
                     "-l", row['remix_url'],
                     "--path", output_dir,
-                    "--max-size", "10m"
-                ], check=True)
-                
-                # オリジナル音源のダウンロード
-                logger.info(f"オリジナル音源をダウンロード中: {row['youtube_url']}")
-                subprocess.run([
-                    "yt-dlp",
-                    "-x",
-                    "--audio-format", "mp3",
-                    "--audio-quality", "0",
-                    "-o", f"{output_dir}/%(title)s.%(ext)s",
-                    row['youtube_url']
+                    "--max-size", "10m",
+                    "-c",
+                    "--overwrite"
                 ], check=True)
                 
                 downloaded_data.append({
                     'remix_url': row['remix_url'],
-                    'youtube_url': row['youtube_url'],
                     'status': 'success'
                 })
                 
@@ -53,7 +49,6 @@ class TrackDownloader:
                 logger.error(f"ダウンロードエラー: {e}")
                 downloaded_data.append({
                     'remix_url': row['remix_url'],
-                    'youtube_url': row['youtube_url'],
                     'status': 'error',
                     'error': str(e)
                 })
