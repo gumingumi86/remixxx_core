@@ -13,7 +13,13 @@ class TrackDownloader:
     def __init__(self, s3_bucket: str, s3_prefix: str):
         self.s3_bucket = s3_bucket
         self.s3_prefix = s3_prefix
-        self.s3_client = boto3.client('s3')
+        
+        # ECRの実行時以外の場合はローカルの認証情報を使用
+        if not os.environ.get('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'):
+            session = boto3.Session(profile_name='default')
+            self.s3_client = session.client('s3')
+        else:
+            self.s3_client = boto3.client('s3')
         
     def download_tracks(self, csv_file: str, output_dir: str) -> List[Dict]:
         """CSVファイルに基づいてトラックをダウンロード"""
