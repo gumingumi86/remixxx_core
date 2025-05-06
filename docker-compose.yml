@@ -1,9 +1,30 @@
-version: '3.8'
+version: '3'
 
 services:
-  linux-dev:
-    build: .
+  downloader:
+    build:
+      context: ./src/downloader
     volumes:
       - .:/workspace
-    tty: true
-    stdin_open: true 
+    command: python3 soundcloud_downloader.py track_pairs.csv --output-dir downloads
+
+  preprocessor:
+    build:
+      context: ./src/preprocessor
+    volumes:
+      - .:/workspace
+    command: python3 audio_preprocessor.py downloads/downloaded_tracks.csv --output-dir processed
+
+  trainer:
+    build:
+      context: ./src/trainer
+    volumes:
+      - .:/workspace
+    command: python3 train.py processed/processed_tracks.csv --output-dir models
+
+  generator:
+    build:
+      context: ./src/generator
+    volumes:
+      - ./src/generator:/workspace
+    command: python3 generate.py models/model_final.pth input.wav --output-dir generated 
