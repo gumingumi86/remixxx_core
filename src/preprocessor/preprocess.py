@@ -179,7 +179,7 @@ def main():
     
     # S3からtrack_pairs.csvをダウンロード
     preprocessor = AudioPreprocessor(s3_bucket, s3_prefix)
-    csv_key = f"{s3_prefix}/track_pairs.csv"
+    csv_key = 'track_pairs.csv'  # S3バケット直下から取得
     csv_path = os.path.join(input_dir, 'track_pairs.csv')
     
     if not preprocessor.download_from_s3(csv_key, csv_path):
@@ -202,11 +202,19 @@ def main():
         )
         
         # 処理結果をS3にアップロード
-        for file in os.listdir(output_dir):
-            if file.endswith(('.npy', '.csv')):
-                local_path = os.path.join(output_dir, file)
-                s3_key = f"{s3_prefix}/processed/{file}"
-                preprocessor.upload_to_s3(local_path, s3_key)
+        if processed_data:
+            # メルスペクトログラムをS3にアップロード
+            mel_dir = os.path.join(output_dir, 'mels')
+            for file in os.listdir(mel_dir):
+                if file.endswith('.npy'):
+                    local_path = os.path.join(mel_dir, file)
+                    s3_key = f"{s3_prefix}/processed/mels/{file}"
+                    preprocessor.upload_to_s3(local_path, s3_key)
+            
+            # processed_tracks.csvをS3バケット直下にアップロード
+            processed_csv = os.path.join(output_dir, 'processed_tracks.csv')
+            if os.path.exists(processed_csv):
+                preprocessor.upload_to_s3(processed_csv, 'processed_tracks.csv')
     
     logger.info("前処理が完了しました")
 

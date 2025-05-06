@@ -27,7 +27,12 @@ services:
       context: ./src/preprocessor
     volumes:
       - .:/workspace
-    command: python3 audio_preprocessor.py downloads/downloaded_tracks.csv --output-dir processed
+      - ./.aws:/root/.aws:ro
+    environment:
+      - PYTHONPATH=/workspace
+      - TARGET_SR=44100
+      - N_MELS=128
+    command: python3 /workspace/src/preprocessor/preprocess.py
 
   trainer:
     build:
