@@ -24,3 +24,7 @@ ENV SAGEMAKER_ROLE="arn:aws:iam::160045700050:role/service-role/AmazonSageMaker-
 ENV INPUT_DATA="s3://remixxx-resources/raw_data/"
 ENV OUTPUT_DATA="s3://remixxx-resources/processed_data/"
 ENV INSTANCE_TYPE="ml.m5.xlarge"
+
+# 音声処理パラメータ
+ENV TARGET_SR="22050"
+ENV N_MELS="128"
