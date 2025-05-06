@@ -6,6 +6,14 @@ import numpy as np
 import librosa
 import soundfile as sf
 import argparse
+import sagemaker
+from sagemaker.transformer import Transformer
+import boto3
+import logging
+from typing import List, Dict
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class RemixGenerator(nn.Module):
     def __init__(self):
@@ -72,24 +80,91 @@ def generate_remix(model_path, input_audio_path, output_path, target_sr=22050, n
     sf.write(output_path, audio_remix, sr)
     print(f"リミックスが生成されました: {output_path}")
 
+class ModelGenerator:
+    def __init__(self, role: str, model_name: str = None):
+        self.role = role
+        self.model_name = model_name
+        self.sagemaker_session = sagemaker.Session()
+        
+    def batch_transform(self,
+                       input_data: str,
+                       output_data: str,
+                       instance_type: str = 'ml.m5.xlarge',
+                       instance_count: int = 1) -> str:
+        """
+        SageMaker Batch Transformを実行してバッチ推論を行います。
+        
+        Args:
+            input_data: 入力データのS3パス
+            output_data: 出力データのS3パス
+            instance_type: インスタンスタイプ
+            instance_count: インスタンス数
+            
+        Returns:
+            バッチ変換ジョブの名前
+        """
+        transformer = Transformer(
+            model_name=self.model_name,
+            instance_type=instance_type,
+            instance_count=instance_count,
+            output_path=output_data,
+            sagemaker_session=self.sagemaker_session
+        )
+        
+        transformer.transform(
+            data=input_data,
+            data_type='S3Prefix',
+            content_type='application/json',
+            split_type='Line'
+        )
+        
+        return transformer.latest_transform_job.job_name
+        
+    def deploy_endpoint(self,
+                       instance_type: str = 'ml.m5.xlarge',
+                       initial_instance_count: int = 1) -> str:
+        """
+        SageMaker Endpointをデプロイします。
+        
+        Args:
+            instance_type: インスタンスタイプ
+            initial_instance_count: 初期インスタンス数
+            
+        Returns:
+            エンドポイント名
+        """
+        predictor = self.model.deploy(
+            initial_instance_count=initial_instance_count,
+            instance_type=instance_type
+        )
+        
+        return predictor.endpoint_name
+
 def main():
-    parser = argparse.ArgumentParser(description='学習済みモデルを使用してリミックスを生成する')
-    parser.add_argument('model_path', help='学習済みモデルのパス')
-    parser.add_argument('input_audio', help='入力音声ファイルのパス')
-    parser.add_argument('--output-dir', default='generated', help='生成されたリミックスの保存先ディレクトリ')
-    parser.add_argument('--target-sr', type=int, default=22050, help='目標サンプリングレート')
-    parser.add_argument('--n-mels', type=int, default=128, help='メルスペクトログラムの次元数')
-    args = parser.parse_args()
+    # 環境変数から設定を読み込み
+    role = os.environ.get('SAGEMAKER_ROLE')
+    model_name = os.environ.get('MODEL_NAME')
+    input_data = os.environ.get('INPUT_DATA')
+    output_data = os.environ.get('OUTPUT_DATA')
     
-    # 出力ディレクトリの作成
-    os.makedirs(args.output_dir, exist_ok=True)
+    if not all([role, model_name, input_data, output_data]):
+        raise ValueError("Required environment variables are missing")
     
-    # 出力ファイル名の生成
-    input_filename = os.path.splitext(os.path.basename(args.input_audio))[0]
-    output_path = os.path.join(args.output_dir, f"{input_filename}_remix.wav")
+    # 生成器の初期化
+    generator = ModelGenerator(role=role, model_name=model_name)
     
-    # リミックスの生成
-    generate_remix(args.model_path, args.input_audio, output_path, args.target_sr, args.n_mels)
+    # バッチ変換の実行
+    if os.environ.get('BATCH_TRANSFORM', 'false').lower() == 'true':
+        job_name = generator.batch_transform(
+            input_data=input_data,
+            output_data=output_data
+        )
+        logger.info(f"Batch transform job started: {job_name}")
+    
+    # エンドポイントのデプロイ
+    if os.environ.get('DEPLOY_ENDPOINT', 'false').lower() == 'true':
+        endpoint_name = generator.deploy_endpoint()
+        logger.info(f"Endpoint deployed: {endpoint_name}")
 
 if __name__ == "__main__":
     main() 

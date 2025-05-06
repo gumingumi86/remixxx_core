@@ -8,6 +8,12 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import numpy as np
+import sagemaker
+from sagemaker.pytorch import PyTorch
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class AudioDataset(Dataset):
     def __init__(self, csv_file, transform=None, target_size=(128, 1024)):
@@ -147,26 +153,72 @@ def train_model(model, train_loader, val_loader, num_epochs=100, output_dir='mod
     
     return model
 
+class ModelTrainer:
+    def __init__(self, role: str, instance_type: str = 'ml.p3.2xlarge'):
+        self.role = role
+        self.instance_type = instance_type
+        self.sagemaker_session = sagemaker.Session()
+        
+    def train_model(self,
+                   input_data: str,
+                   output_path: str,
+                   hyperparameters: dict = None):
+        """
+        SageMaker Training Jobを実行してモデルを学習します。
+        
+        Args:
+            input_data: 学習データのS3パス
+            output_path: モデルの出力先S3パス
+            hyperparameters: ハイパーパラメータの辞書
+        """
+        if hyperparameters is None:
+            hyperparameters = {
+                'epochs': 10,
+                'batch-size': 32,
+                'learning-rate': 0.001
+            }
+            
+        pytorch_estimator = PyTorch(
+            entry_point='train.py',
+            role=self.role,
+            instance_type=self.instance_type,
+            instance_count=1,
+            framework_version='1.8.1',
+            py_version='py3',
+            hyperparameters=hyperparameters,
+            output_path=output_path,
+            sagemaker_session=self.sagemaker_session
+        )
+        
+        pytorch_estimator.fit({'training': input_data})
+        
+        return pytorch_estimator
+
 def main():
-    import argparse
-    parser = argparse.ArgumentParser(description='リミックス生成モデルを学習する')
-    parser.add_argument('input_csv', help='前処理済みのデータセットのCSVファイル')
-    parser.add_argument('--output-dir', default='models', help='モデルの保存先ディレクトリ')
-    parser.add_argument('--batch-size', type=int, default=32, help='バッチサイズ')
-    parser.add_argument('--num-epochs', type=int, default=100, help='エポック数')
-    args = parser.parse_args()
+    # 環境変数から設定を読み込み
+    role = os.environ.get('SAGEMAKER_ROLE')
+    input_data = os.environ.get('TRAINING_DATA')
+    output_path = os.environ.get('MODEL_OUTPUT_PATH')
     
-    # データセットの準備
-    dataset = AudioDataset(args.input_csv)
-    train_data, val_data = train_test_split(dataset, test_size=0.2, random_state=42)
+    if not all([role, input_data, output_path]):
+        raise ValueError("Required environment variables are missing")
     
-    train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_data, batch_size=args.batch_size, shuffle=False)
+    # 学習の実行
+    trainer = ModelTrainer(role=role)
+    estimator = trainer.train_model(
+        input_data=input_data,
+        output_path=output_path
+    )
     
-    # モデルの学習
-    model = RemixGenerator()
-    trained_model = train_model(model, train_loader, val_loader, args.num_epochs, args.output_dir)
-    print(f"学習が完了しました。モデルは {args.output_dir} に保存されています。")
+    logger.info("Training job completed successfully")
+    
+    # モデルのデプロイ（オプション）
+    if os.environ.get('DEPLOY_MODEL', 'false').lower() == 'true':
+        predictor = estimator.deploy(
+            initial_instance_count=1,
+            instance_type='ml.m5.xlarge'
+        )
+        logger.info("Model deployed successfully")
 
 if __name__ == "__main__":
     main() 
