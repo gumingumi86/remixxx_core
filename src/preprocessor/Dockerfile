@@ -28,3 +28,12 @@ ENV INSTANCE_TYPE="ml.m5.xlarge"
 # 音声処理パラメータ
 ENV TARGET_SR="22050"
 ENV N_MELS="128"
+
+# 入力出力ディレクトリ
+ENV INPUT_DIR="raw_data"
+ENV OUTPUT_DIR="processed"
+
+# S3設定
+ENV S3_BUCKET="remixxx-resources"
+ENV S3_PREFIX="raw_data"
+ENV USE_SAGEMAKER="false"

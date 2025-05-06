@@ -18,7 +18,20 @@ class AudioPreprocessor:
     def __init__(self, s3_bucket: str, s3_prefix: str):
         self.s3_bucket = s3_bucket
         self.s3_prefix = s3_prefix
-        self.s3_client = boto3.client('s3')
+        
+        # S3バケットが指定されている場合のみ、AWS認証を設定
+        if s3_bucket:
+            try:
+                # 環境変数からプロファイル名を取得（デフォルトは'default'）
+                profile_name = os.environ.get('AWS_PROFILE', 'default')
+                session = boto3.Session(profile_name=profile_name)
+                self.s3_client = session.client('s3')
+                logger.info(f"AWS認証情報をプロファイル '{profile_name}' から読み込みました")
+            except Exception as e:
+                logger.error(f"AWS認証情報の読み込みに失敗しました: {str(e)}")
+                self.s3_client = None
+        else:
+            self.s3_client = None
         
     def download_from_s3(self, s3_key: str, local_path: str):
         """S3からファイルをダウンロード"""
@@ -74,8 +87,8 @@ class AudioPreprocessor:
         for _, row in tqdm(df.iterrows(), total=len(df)):
             try:
                 # リミックス音源の処理
-                remix_path = os.path.join(input_dir, f"remix_{row['remix_url'].split('/')[-1]}.mp3")
-                remix_mel_path = os.path.join(mel_dir, f"remix_{row['id']}.npy")
+                remix_path = os.path.join(input_dir, row['remix_file'])
+                remix_mel_path = os.path.join(mel_dir, f"remix_{os.path.splitext(os.path.basename(row['remix_file']))[0]}.npy")
                 
                 if os.path.exists(remix_path) and not os.path.exists(remix_mel_path):
                     remix_mel = self.process_audio(remix_path, target_sr, n_mels)
@@ -83,8 +96,8 @@ class AudioPreprocessor:
                         np.save(remix_mel_path, remix_mel)
                 
                 # オリジナル音源の処理
-                original_path = os.path.join(input_dir, f"original_{row['original_name']}.mp3")
-                original_mel_path = os.path.join(mel_dir, f"original_{row['id']}.npy")
+                original_path = os.path.join(input_dir, row['original_file'])
+                original_mel_path = os.path.join(mel_dir, f"original_{os.path.splitext(os.path.basename(row['original_file']))[0]}.npy")
                 
                 if os.path.exists(original_path) and not os.path.exists(original_mel_path):
                     original_mel = self.process_audio(original_path, target_sr, n_mels)
@@ -92,16 +105,18 @@ class AudioPreprocessor:
                         np.save(original_mel_path, original_mel)
                 
                 processed_data.append({
-                    'id': row['id'],
-                    'original_mel': original_mel_path if os.path.exists(original_mel_path) else None,
+                    'remix_file': row['remix_file'],
+                    'original_file': row['original_file'],
                     'remix_mel': remix_mel_path if os.path.exists(remix_mel_path) else None,
+                    'original_mel': original_mel_path if os.path.exists(original_mel_path) else None,
                     'status': 'success'
                 })
                 
             except Exception as e:
                 logger.error(f"処理エラー: {row['remix_url']} - {str(e)}")
                 processed_data.append({
-                    'id': row['id'],
+                    'remix_file': row['remix_file'],
+                    'original_file': row['original_file'],
                     'status': 'error',
                     'error': str(e)
                 })
@@ -164,6 +179,8 @@ def main():
     use_sagemaker = os.environ.get('USE_SAGEMAKER', 'false').lower() == 'true'
     target_sr = int(os.environ.get('TARGET_SR', '22050'))
     n_mels = int(os.environ.get('N_MELS', '128'))
+    input_dir = os.environ.get('INPUT_DIR', 'raw_data')
+    output_dir = os.environ.get('OUTPUT_DIR', 'processed')
     
     if not s3_bucket:
         raise ValueError("S3_BUCKET environment variable is required")
@@ -171,15 +188,13 @@ def main():
     if use_sagemaker and not role:
         raise ValueError("SAGEMAKER_ROLE environment variable is required when using SageMaker")
     
-    # ローカルディレクトリの設定
-    input_dir = 'input'
-    output_dir = 'output'
+    # ディレクトリの作成
     os.makedirs(input_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
     
     # S3からtrack_pairs.csvをダウンロード
     preprocessor = AudioPreprocessor(s3_bucket, s3_prefix)
-    csv_key = 'track_pairs.csv'  # S3バケット直下から取得
+    csv_key = f"{s3_prefix}/metadata/track_pairs.csv"  # メタデータディレクトリから取得
     csv_path = os.path.join(input_dir, 'track_pairs.csv')
     
     if not preprocessor.download_from_s3(csv_key, csv_path):
