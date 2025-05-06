@@ -1,7 +1,7 @@
 version: '3'
 
 services:
-  track_searcher:
+  track_manager:
     build:
       context: ./src/downloader
     volumes:
@@ -9,21 +9,10 @@ services:
     environment:
       - SEARCH_QUERY=anime lofi remix
       - MAX_TRACKS=5
-    command: python3 /workspace/src/downloader/track_searcher.py
-
-  track_downloader:
-    build:
-      context: ./src/downloader
-    volumes:
-      - .:/workspace
-    environment:
       - S3_BUCKET=remixxx-resources
       - S3_PREFIX=raw_data
-      - INPUT_CSV=track_pairs.csv
-      - OUTPUT_DIR=downloads
-    depends_on:
-      - track_searcher
-    command: python3 /workspace/src/downloader/track_downloader.py
+      - DOWNLOAD_DIR=downloads
+    command: python3 /workspace/src/downloader/track_searcher.py
 
   preprocessor:
     build:

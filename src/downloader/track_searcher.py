@@ -5,6 +5,7 @@ import subprocess
 import urllib.parse
 import re
 import csv
+import boto3
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -26,9 +27,19 @@ EXCLUDE_WORDS = [
     'live', 'version', 'extended', 'radio', 'edit'
 ]
 
-class TrackSearcher:
-    def __init__(self):
+class TrackManager:
+    def __init__(self, s3_bucket=None, s3_prefix='raw_data'):
         self.driver = None
+        self.s3_bucket = s3_bucket
+        self.s3_prefix = s3_prefix
+        
+        # ECRの実行時以外の場合はローカルの認証情報を使用
+        if s3_bucket:
+            if not os.environ.get('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'):
+                session = boto3.Session(profile_name='default')
+                self.s3_client = session.client('s3')
+            else:
+                self.s3_client = boto3.client('s3')
         
     def setup_driver(self):
         """Chromeドライバーのセットアップ"""
@@ -59,6 +70,77 @@ class TrackSearcher:
         name = ' '.join(name.split())
         
         return name.strip()
+    
+    def download_soundcloud_track(self, url: str, output_dir: str) -> str:
+        """SoundCloudからトラックをダウンロード"""
+        try:
+            logger.info(f"ダウンロード中: {url}")
+            subprocess.run([
+                "scdl",
+                "-l", url,
+                "--path", output_dir,
+                "--max-size", "10m",
+                "-c",
+                "--overwrite"
+            ], check=True)
+            
+            # ダウンロードされたファイルを確認
+            files = [f for f in os.listdir(output_dir) if f.endswith('.mp3')]
+            if files:
+                latest_file = max(files, key=lambda x: os.path.getctime(os.path.join(output_dir, x)))
+                logger.info(f"ダウンロード成功: {latest_file}")
+                return latest_file
+            else:
+                logger.warning(f"ファイルが見つかりません: {url}")
+                return None
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"ダウンロードエラー: {url} - {e}")
+            return None
+    
+    def download_youtube_track(self, url: str, output_dir: str) -> str:
+        """YouTubeからトラックをダウンロード"""
+        try:
+            logger.info(f"ダウンロード中: {url}")
+            subprocess.run([
+                "yt-dlp",
+                "-x",
+                "--audio-format", "mp3",
+                "--audio-quality", "0",
+                "-o", f"{output_dir}/%(title)s.%(ext)s",
+                url
+            ], check=True)
+            
+            # ダウンロードされたファイルを確認
+            files = [f for f in os.listdir(output_dir) if f.endswith('.mp3')]
+            if files:
+                latest_file = max(files, key=lambda x: os.path.getctime(os.path.join(output_dir, x)))
+                logger.info(f"ダウンロード成功: {latest_file}")
+                return latest_file
+            else:
+                logger.warning(f"ファイルが見つかりません: {url}")
+                return None
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"ダウンロードエラー: {url} - {e}")
+            return None
+    
+    def upload_to_s3(self, local_dir: str):
+        """ダウンロードしたファイルをS3にアップロード"""
+        if not self.s3_bucket:
+            logger.warning("S3バケットが設定されていないため、アップロードをスキップします")
+            return
+            
+        for file in os.listdir(local_dir):
+            if file.endswith(('.mp3', '.wav', '.csv')):
+                local_path = os.path.join(local_dir, file)
+                s3_key = f"{self.s3_prefix}/{file}"
+                
+                try:
+                    self.s3_client.upload_file(local_path, self.s3_bucket, s3_key)
+                    logger.info(f"アップロード成功: {file}")
+                except Exception as e:
+                    logger.error(f"アップロードエラー: {file} - {str(e)}")
     
     def search_soundcloud_tracks(self, search_query, max_tracks=10):
         """SoundCloudでリミックス音源を検索"""
@@ -159,108 +241,43 @@ class TrackSearcher:
                 original_file
             ])
     
-    def close(self):
-        """ドライバーを閉じる"""
-        if self.driver:
-            self.driver.quit()
-            self.driver = None
-
-def get_environment_variables():
-    """環境変数から設定を取得"""
-    search_query = os.environ.get('SEARCH_QUERY')
-    max_tracks = int(os.environ.get('MAX_TRACKS', '5'))
-    download_dir = os.environ.get('DOWNLOAD_DIR', 'downloads')
-    auto_download = os.environ.get('AUTO_DOWNLOAD', 'false').lower() == 'true'
-    
-    if not search_query:
-        raise ValueError("SEARCH_QUERY environment variable is required")
-    
-    return {
-        'search_query': search_query,
-        'max_tracks': max_tracks,
-        'download_dir': download_dir,
-        'auto_download': auto_download
-    }
-
-def main():
-    searcher = TrackSearcher()
-    try:
-        # 環境変数から設定を取得
-        search_query = os.environ.get('SEARCH_QUERY')
-        max_tracks = int(os.environ.get('MAX_TRACKS', '5'))
-        download_dir = os.environ.get('DOWNLOAD_DIR', 'downloads')
-        
-        if not search_query:
-            raise ValueError("SEARCH_QUERY environment variable is required")
-        
-        logger.info("検索結果からURLを取得中...")
-        urls = searcher.search_soundcloud_tracks(search_query, max_tracks)
-        
-        if not urls:
-            logger.error("トラックが見つかりませんでした。")
-            return
-        
-        logger.info(f"{len(urls)}個のトラックが見つかりました。")
-        
-        os.makedirs(download_dir, exist_ok=True)
-        
-        # リミックス音源のダウンロード
-        downloaded_files = []
-        for i, url in enumerate(urls, 1):
-            try:
-                logger.info(f"\n[{i}/{len(urls)}] ダウンロード中: {url}")
-                try:
-                    subprocess.run([
-                        "scdl",
-                        "-l", url,
-                        "--path", download_dir,
-                        "--max-size", "10m",
-                        "-c",  # 既存のファイルを上書き
-                        "--overwrite"  # 強制的に上書き
-                    ], check=True)
+    def process_tracks(self, search_query, max_tracks=5, download_dir='downloads'):
+        """トラックの検索、ダウンロード、S3アップロードを一括で実行"""
+        try:
+            os.makedirs(download_dir, exist_ok=True)
+            
+            # SoundCloudでリミックス音源を検索
+            logger.info("検索結果からURLを取得中...")
+            urls = self.search_soundcloud_tracks(search_query, max_tracks)
+            
+            if not urls:
+                logger.error("トラックが見つかりませんでした。")
+                return
+            
+            logger.info(f"{len(urls)}個のトラックが見つかりました。")
+            
+            # リミックス音源のダウンロード
+            downloaded_files = []
+            for i, url in enumerate(urls, 1):
+                logger.info(f"\n[{i}/{len(urls)}] 処理中...")
+                remix_file = self.download_soundcloud_track(url, download_dir)
+                if remix_file:
+                    downloaded_files.append((remix_file, url))
                     time.sleep(1)
+            
+            # オリジナル曲の検索とダウンロード
+            logger.info("オリジナル曲の検索を開始します...")
+            for i, (filename, url) in enumerate(downloaded_files, 1):
+                original_name = self.clean_filename(filename)
+                if original_name:
+                    logger.info(f"\n[{i}/{len(downloaded_files)}] ファイル名: {filename}")
+                    logger.info(f"抽出した曲名: {original_name}")
                     
-                    # ダウンロードされたファイルを確認
-                    files = [f for f in os.listdir(download_dir) if f.endswith('.mp3')]
-                    if files:
-                        latest_file = max(files, key=lambda x: os.path.getctime(os.path.join(download_dir, x)))
-                        downloaded_files.append(latest_file)
-                        logger.info(f"ダウンロード成功: {latest_file}")
-                    else:
-                        logger.warning(f"ファイルが見つかりません: {url}")
-                except subprocess.CalledProcessError as e:
-                    logger.error(f"ダウンロードエラー: {url} - {e}")
-                    continue
-            except Exception as e:
-                logger.error(f"ダウンロードエラー: {url} - {e}")
-        
-        logger.info("リミックス音源のダウンロードが完了しました。")
-        
-        # オリジナル曲の検索とダウンロード
-        logger.info("オリジナル曲の検索を開始します...")
-        for i, (filename, url) in enumerate(zip(downloaded_files, urls), 1):
-            original_name = searcher.clean_filename(filename)
-            if original_name:
-                logger.info(f"\n[{i}/{len(downloaded_files)}] ファイル名: {filename}")
-                logger.info(f"抽出した曲名: {original_name}")
-                
-                youtube_url = searcher.search_youtube_video(original_name)
-                if youtube_url:
-                    logger.info(f"オリジナル曲をダウンロード中: {youtube_url}")
-                    try:
-                        subprocess.run([
-                            "yt-dlp",
-                            "-x",
-                            "--audio-format", "mp3",
-                            "--audio-quality", "0",
-                            "-o", f"{download_dir}/%(title)s.%(ext)s",
-                            youtube_url
-                        ], check=True)
-                        
-                        original_files = [f for f in os.listdir(download_dir) if f.endswith('.mp3')]
-                        if original_files:
-                            original_file = max(original_files, key=lambda x: os.path.getctime(os.path.join(download_dir, x)))
-                            searcher.save_track_pairs(
+                    youtube_url = self.search_youtube_video(original_name)
+                    if youtube_url:
+                        original_file = self.download_youtube_track(youtube_url, download_dir)
+                        if original_file:
+                            self.save_track_pairs(
                                 os.path.join(download_dir, filename),
                                 url,
                                 original_name,
@@ -268,17 +285,38 @@ def main():
                                 os.path.join(download_dir, original_file)
                             )
                             logger.info("対応関係をCSVに保存しました。")
-                    except subprocess.CalledProcessError as e:
-                        logger.error(f"ダウンロードエラー: {e}")
-                else:
-                    logger.warning("オリジナル曲が見つかりませんでした。")
-        
-        logger.info("\nすべてのダウンロードが完了しました。")
-        logger.info(f"ダウンロードされたファイルは以下のディレクトリに保存されています：")
-        logger.info(f"保存先: {download_dir}")
             
-    finally:
-        searcher.close()
+            # S3へのアップロード
+            if self.s3_bucket:
+                self.upload_to_s3(download_dir)
+            
+            logger.info("\nすべての処理が完了しました。")
+            logger.info(f"ファイルは以下のディレクトリに保存されています：")
+            logger.info(f"保存先: {download_dir}")
+            
+        finally:
+            self.close()
+    
+    def close(self):
+        """ドライバーを閉じる"""
+        if self.driver:
+            self.driver.quit()
+            self.driver = None
+
+def main():
+    # 環境変数から設定を取得
+    search_query = os.environ.get('SEARCH_QUERY')
+    max_tracks = int(os.environ.get('MAX_TRACKS', '5'))
+    download_dir = os.environ.get('DOWNLOAD_DIR', 'downloads')
+    s3_bucket = os.environ.get('S3_BUCKET')
+    s3_prefix = os.environ.get('S3_PREFIX', 'raw_data')
+    
+    if not search_query:
+        raise ValueError("SEARCH_QUERY environment variable is required")
+    
+    # TrackManagerの初期化と実行
+    manager = TrackManager(s3_bucket, s3_prefix)
+    manager.process_tracks(search_query, max_tracks, download_dir)
 
 if __name__ == "__main__":
     main() 
