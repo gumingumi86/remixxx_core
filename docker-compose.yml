@@ -6,12 +6,8 @@ services:
       context: ./src/downloader
     volumes:
       - .:/workspace
-    environment:
-      - SEARCH_QUERY=anime lofi remix
-      - MAX_TRACKS=5
-      - S3_BUCKET=remixxx-resources
-      - S3_PREFIX=raw_data
-      - DOWNLOAD_DIR=downloads
+      - ./.aws:/root/.aws:ro
+
     command: python3 /workspace/src/downloader/track_searcher.py
 
   test_track_manager:

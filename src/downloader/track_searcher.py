@@ -33,13 +33,19 @@ class TrackManager:
         self.s3_bucket = s3_bucket
         self.s3_prefix = s3_prefix
         
-        # ECRの実行時以外の場合はローカルの認証情報を使用
+        # S3バケットが指定されている場合のみ、AWS認証を設定
         if s3_bucket:
-            if not os.environ.get('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'):
-                session = boto3.Session(profile_name='default')
+            try:
+                # 環境変数からプロファイル名を取得（デフォルトは'default'）
+                profile_name = os.environ.get('AWS_PROFILE', 'default')
+                session = boto3.Session(profile_name=profile_name)
                 self.s3_client = session.client('s3')
-            else:
-                self.s3_client = boto3.client('s3')
+                logger.info(f"AWS認証情報をプロファイル '{profile_name}' から読み込みました")
+            except Exception as e:
+                logger.error(f"AWS認証情報の読み込みに失敗しました: {str(e)}")
+                self.s3_client = None
+        else:
+            self.s3_client = None
         
     def setup_driver(self):
         """Chromeドライバーのセットアップ"""
@@ -224,7 +230,9 @@ class TrackManager:
     
     def save_track_pairs(self, remix_file, remix_url, original_name, youtube_url, original_file):
         """リミックスとオリジナルの対応関係をCSVに保存"""
-        csv_file = 'track_pairs.csv'
+        # 環境変数からCSVファイル名を取得し、downloadsディレクトリ内に保存
+        csv_filename = os.environ.get('OUTPUT_CSV', 'track_pairs.csv')
+        csv_file = os.path.join('downloads', csv_filename)
         file_exists = os.path.exists(csv_file)
         
         with open(csv_file, 'a', newline='', encoding='utf-8') as f:
@@ -289,7 +297,14 @@ class TrackManager:
             # S3へのアップロード
             if self.s3_bucket:
                 self.upload_to_s3(download_dir)
-            
+
+                # track_pairs.csvをS3バケットの直下にアップロード
+                csv_filename = os.environ.get('OUTPUT_CSV', 'track_pairs.csv')
+                csv_file = os.path.join(download_dir, csv_filename)
+                if os.path.exists(csv_file):
+                    self.s3_client.upload_file(csv_file, self.s3_bucket, csv_filename)
+                    logger.info(f"{csv_filename}をS3バケットの直下にアップロードしました")
+
             logger.info("\nすべての処理が完了しました。")
             logger.info(f"ファイルは以下のディレクトリに保存されています：")
             logger.info(f"保存先: {download_dir}")

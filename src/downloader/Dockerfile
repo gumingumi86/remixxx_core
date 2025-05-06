@@ -33,6 +33,7 @@ SHELL ["/bin/bash", "-c"]
 # 共通の環境変数
 ENV S3_BUCKET="remixxx-resources"
 ENV S3_PREFIX="raw_data"
+ENV AWS_PROFILE="default"
 
 # 検索用の環境変数
 ENV SEARCH_QUERY="anime lofi remix"
@@ -40,5 +41,4 @@ ENV MAX_TRACKS="5"
 ENV OUTPUT_CSV="track_pairs.csv"
 
 # ダウンロード用の環境変数
-ENV INPUT_CSV="track_pairs.csv"
-ENV OUTPUT_DIR="downloads"
+ENV DOWNLOAD_DIR=downloads

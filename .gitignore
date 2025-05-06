@@ -3,3 +3,5 @@ downloads
 track_pairs.csv
 training_curve.png
 remix_generator.pth
+.aws
+__pycache__
