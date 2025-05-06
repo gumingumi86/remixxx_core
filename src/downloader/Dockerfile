@@ -39,6 +39,3 @@ ENV AWS_PROFILE="default"
 ENV SEARCH_QUERY="anime lofi remix"
 ENV MAX_TRACKS="5"
 ENV OUTPUT_CSV="track_pairs.csv"
-
-# ダウンロード用の環境変数
-ENV DOWNLOAD_DIR=downloads

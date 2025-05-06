@@ -232,10 +232,9 @@ class TrackManager:
         """リミックスとオリジナルの対応関係をCSVに保存"""
         # 環境変数からCSVファイル名を取得し、downloadsディレクトリ内に保存
         csv_filename = os.environ.get('OUTPUT_CSV', 'track_pairs.csv')
-        csv_file = os.path.join('downloads', csv_filename)
-        file_exists = os.path.exists(csv_file)
+        file_exists = os.path.exists(csv_filename)
         
-        with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+        with open(csv_filename, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             if not file_exists:
                 writer.writerow(['timestamp', 'remix_file', 'remix_url', 'original_name', 'youtube_url', 'original_file'])
@@ -249,7 +248,7 @@ class TrackManager:
                 original_file
             ])
     
-    def process_tracks(self, search_query, max_tracks=5, download_dir='downloads'):
+    def process_tracks(self, search_query, max_tracks, download_dir):
         """トラックの検索、ダウンロード、S3アップロードを一括で実行"""
         try:
             os.makedirs(download_dir, exist_ok=True)
@@ -300,9 +299,8 @@ class TrackManager:
 
                 # track_pairs.csvをS3バケットの直下にアップロード
                 csv_filename = os.environ.get('OUTPUT_CSV', 'track_pairs.csv')
-                csv_file = os.path.join(download_dir, csv_filename)
-                if os.path.exists(csv_file):
-                    self.s3_client.upload_file(csv_file, self.s3_bucket, csv_filename)
+                if os.path.exists(csv_filename):
+                    self.s3_client.upload_file(csv_filename, self.s3_bucket, csv_filename)
                     logger.info(f"{csv_filename}をS3バケットの直下にアップロードしました")
 
             logger.info("\nすべての処理が完了しました。")
@@ -322,7 +320,6 @@ def main():
     # 環境変数から設定を取得
     search_query = os.environ.get('SEARCH_QUERY')
     max_tracks = int(os.environ.get('MAX_TRACKS', '5'))
-    download_dir = os.environ.get('DOWNLOAD_DIR', 'downloads')
     s3_bucket = os.environ.get('S3_BUCKET')
     s3_prefix = os.environ.get('S3_PREFIX', 'raw_data')
     
@@ -331,7 +328,7 @@ def main():
     
     # TrackManagerの初期化と実行
     manager = TrackManager(s3_bucket, s3_prefix)
-    manager.process_tracks(search_query, max_tracks, download_dir)
+    manager.process_tracks(search_query, max_tracks, s3_prefix)
 
 if __name__ == "__main__":
     main() 
