@@ -138,15 +138,26 @@ class TrackManager:
             return
             
         for file in os.listdir(local_dir):
-            if file.endswith(('.mp3', '.wav', '.csv')):
+            if file.endswith(('.mp3', '.wav')):
                 local_path = os.path.join(local_dir, file)
-                s3_key = f"{self.s3_prefix}/{file}"
+                s3_key = f"{self.s3_prefix}/audio/{file}"
                 
                 try:
                     self.s3_client.upload_file(local_path, self.s3_bucket, s3_key)
                     logger.info(f"アップロード成功: {file}")
                 except Exception as e:
                     logger.error(f"アップロードエラー: {file} - {str(e)}")
+        
+        # CSVファイルのアップロード
+        csv_filename = os.environ.get('OUTPUT_CSV', 'track_pairs.csv')
+        csv_path = os.path.join('raw_data', 'metadata', csv_filename)
+        if os.path.exists(csv_path):
+            try:
+                s3_key = f"{self.s3_prefix}/metadata/{csv_filename}"
+                self.s3_client.upload_file(csv_path, self.s3_bucket, s3_key)
+                logger.info(f"CSVファイルのアップロード成功: {csv_filename}")
+            except Exception as e:
+                logger.error(f"CSVファイルのアップロードエラー: {csv_filename} - {str(e)}")
     
     def search_soundcloud_tracks(self, search_query, max_tracks=10):
         """SoundCloudでリミックス音源を検索"""
@@ -230,11 +241,18 @@ class TrackManager:
     
     def save_track_pairs(self, remix_file, remix_url, original_name, youtube_url, original_file):
         """リミックスとオリジナルの対応関係をCSVに保存"""
-        # 環境変数からCSVファイル名を取得し、downloadsディレクトリ内に保存
+        # 環境変数からCSVファイル名を取得
         csv_filename = os.environ.get('OUTPUT_CSV', 'track_pairs.csv')
-        file_exists = os.path.exists(csv_filename)
         
-        with open(csv_filename, 'a', newline='', encoding='utf-8') as f:
+        # metadataディレクトリの作成
+        metadata_dir = os.path.join('raw_data', 'metadata')
+        os.makedirs(metadata_dir, exist_ok=True)
+        
+        # CSVファイルのパスを設定
+        csv_path = os.path.join(metadata_dir, csv_filename)
+        file_exists = os.path.exists(csv_path)
+        
+        with open(csv_path, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             if not file_exists:
                 writer.writerow(['timestamp', 'remix_file', 'remix_url', 'original_name', 'youtube_url', 'original_file'])
@@ -296,12 +314,6 @@ class TrackManager:
             # S3へのアップロード
             if self.s3_bucket:
                 self.upload_to_s3(download_dir)
-
-                # track_pairs.csvをS3バケットの直下にアップロード
-                csv_filename = os.environ.get('OUTPUT_CSV', 'track_pairs.csv')
-                if os.path.exists(csv_filename):
-                    self.s3_client.upload_file(csv_filename, self.s3_bucket, csv_filename)
-                    logger.info(f"{csv_filename}をS3バケットの直下にアップロードしました")
 
             logger.info("\nすべての処理が完了しました。")
             logger.info(f"ファイルは以下のディレクトリに保存されています：")
